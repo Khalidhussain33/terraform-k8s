@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	github.com/go-logr/logr v0.1.0
-	github.com/hashicorp/go-tfe v0.7.0
+	github.com/hashicorp/go-tfe v0.10.3-0.20201008200721-89985348ec82
 	github.com/hashicorp/terraform v0.12.25
 	github.com/mitchellh/cli v1.1.1
 	github.com/operator-framework/operator-sdk v0.18.0

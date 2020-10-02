@@ -59,9 +59,9 @@ func createTerraformConfig(address string, tfConfig *cliconfig.Config) (*tfc.Con
 
 	ua := fmt.Sprintf("terraform-k8s/%s", version.Version)
 	return &tfc.Config{
-		Address: address,
-		Token:   fmt.Sprintf("%v", tfConfig.Credentials[host]["token"]),
-		Headers: http.Header{"User-Agent": []string{ua}},
+		Address:    address,
+		Token:      fmt.Sprintf("%v", tfConfig.Credentials[host]["token"]),
+		Headers:    http.Header{"User-Agent": []string{ua}},
 		HTTPClient: httpClient,
 	}, nil
 }
@@ -92,6 +92,28 @@ func (t *TerraformCloudClient) CheckOrganization() error {
 	return err
 }
 
+func (t *TerraformCloudClient) updateAgentPoolID(instance *appv1alpha1.Workspace, workspace *tfc.Workspace) error {
+	if instance.Spec.AgentPoolID == workspace.AgentPoolID {
+		return nil
+	}
+
+	updateOptions := tfc.WorkspaceUpdateOptions{
+		AgentPoolID: &instance.Spec.AgentPoolID,
+	}
+
+	if instance.Spec.AgentPoolID != "" {
+		updateOptions.ExecutionMode = tfc.String("agent")
+	} else {
+		updateOptions.ExecutionMode = tfc.String("")
+	}
+
+	_, err := t.Client.Workspaces.Update(context.Background(), t.Organization, workspace.Name, updateOptions)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // CheckWorkspace looks for a workspace
 func (t *TerraformCloudClient) CheckWorkspace(workspace string, instance *appv1alpha1.Workspace) (*tfc.Workspace, error) {
 	ws, err := t.Client.Workspaces.Read(context.TODO(), t.Organization, workspace)
@@ -115,6 +137,13 @@ func (t *TerraformCloudClient) CheckWorkspace(workspace string, instance *appv1a
 		_, err = t.UnassignWorkspaceSSHKey(ws.ID)
 		if err != nil {
 			return nil, fmt.Errorf("Error while unassigning ssh key to workspace: %s", err)
+		}
+	}
+
+	if instance.Spec.AgentPoolID != ws.AgentPoolID {
+		err := t.updateAgentPoolID(instance, ws)
+		if err != nil {
+			return nil, fmt.Errorf("error while updating Agent Pool ID settings for workspace %q: %s", ws.Name, err)
 		}
 	}
 

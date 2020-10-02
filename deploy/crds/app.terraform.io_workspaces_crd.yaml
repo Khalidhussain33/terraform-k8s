@@ -31,6 +31,9 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace
             properties:
+              agentPoolID:
+                description: Specifies the agent pool ID we wish to use.
+                type: string
               module:
                 description: Module source and version to use
                 nullable: true
@@ -195,7 +198,7 @@ spec:
                     type: string
                   token_id:
                     description: Token ID of the VCS Connection (OAuth Connection
-                      Token) to use
+                      Token) to use https://www.terraform.io/docs/cloud/vcs
                     type: string
                 required:
                 - repo_identifier

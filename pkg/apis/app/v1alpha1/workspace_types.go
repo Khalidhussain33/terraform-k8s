@@ -94,6 +94,9 @@ type WorkspaceSpec struct {
 	// Outputs denote outputs wanted
 	// +optional
 	Outputs []*OutputSpec `json:"outputs,omitempty"`
+	// Specifies the agent pool ID we wish to use.
+	// +optional
+	AgentPoolID string `json:"agentPoolID,omitempty"`
 }
 
 // WorkspaceStatus defines the observed state of Workspace

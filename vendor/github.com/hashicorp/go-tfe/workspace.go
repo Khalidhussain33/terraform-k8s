@@ -77,10 +77,12 @@ type WorkspaceList struct {
 type Workspace struct {
 	ID                   string                `jsonapi:"primary,workspaces"`
 	Actions              *WorkspaceActions     `jsonapi:"attr,actions"`
+	AgentPoolID          string                `jsonapi:"attr,agent-pool-id"`
 	AutoApply            bool                  `jsonapi:"attr,auto-apply"`
 	CanQueueDestroyPlan  bool                  `jsonapi:"attr,can-queue-destroy-plan"`
 	CreatedAt            time.Time             `jsonapi:"attr,created-at,iso8601"`
 	Environment          string                `jsonapi:"attr,environment"`
+	ExecutionMode        string                `jsonapi:"attr,execution-mode"`
 	FileTriggersEnabled  bool                  `jsonapi:"attr,file-triggers-enabled"`
 	Locked               bool                  `jsonapi:"attr,locked"`
 	MigrationEnvironment string                `jsonapi:"attr,migration-environment"`
@@ -88,12 +90,14 @@ type Workspace struct {
 	Operations           bool                  `jsonapi:"attr,operations"`
 	Permissions          *WorkspacePermissions `jsonapi:"attr,permissions"`
 	QueueAllRuns         bool                  `jsonapi:"attr,queue-all-runs"`
+	SpeculativeEnabled   bool                  `jsonapi:"attr,speculative-enabled"`
 	TerraformVersion     string                `jsonapi:"attr,terraform-version"`
 	TriggerPrefixes      []string              `jsonapi:"attr,trigger-prefixes"`
 	VCSRepo              *VCSRepo              `jsonapi:"attr,vcs-repo"`
 	WorkingDirectory     string                `jsonapi:"attr,working-directory"`
 
 	// Relations
+	AgentPool    *AgentPool    `jsonapi:"relation,agent-pool"`
 	CurrentRun   *Run          `jsonapi:"relation,current-run"`
 	Organization *Organization `jsonapi:"relation,organization"`
 	SSHKey       *SSHKey       `jsonapi:"relation,ssh-key"`
@@ -102,6 +106,7 @@ type Workspace struct {
 // VCSRepo contains the configuration of a VCS integration.
 type VCSRepo struct {
 	Branch            string `json:"branch"`
+	DisplayIdentifier string `json:"display-identifier"`
 	Identifier        string `json:"identifier"`
 	IngressSubmodules bool   `json:"ingress-submodules"`
 	OAuthTokenID      string `json:"oauth-token-id"`
@@ -160,8 +165,18 @@ type WorkspaceCreateOptions struct {
 	// For internal use only!
 	ID string `jsonapi:"primary,workspaces"`
 
+	// Required when execution-mode is set to agent. The ID of the agent pool
+	// belonging to the workspace's organization. This value must not be specified
+	// if execution-mode is set to remote or local or if operations is set to true.
+	AgentPoolID *string `jsonapi:"attr,agent-pool-id,omitempty"`
+
 	// Whether to automatically apply changes when a Terraform plan is successful.
 	AutoApply *bool `jsonapi:"attr,auto-apply,omitempty"`
+
+	// Which execution mode to use. Valid values are remote, local, and agent.
+	// When set to local, the workspace will be used for state storage only.
+	// This value must not be specified if operations is specified.
+	ExecutionMode *string `jsonapi:"attr,execution-mode,omitempty"`
 
 	// Whether to filter runs based on the changed files in a VCS push. If
 	// enabled, the working directory and trigger prefixes describe a set of
@@ -186,6 +201,12 @@ type WorkspaceCreateOptions struct {
 	// a webhook will not be queued until at least one run is manually queued.
 	QueueAllRuns *bool `jsonapi:"attr,queue-all-runs,omitempty"`
 
+	// Whether this workspace allows speculative plans. Setting this to false
+	// prevents Terraform Cloud or the Terraform Enterprise instance from
+	// running plans on pull requests, which can improve security if the VCS
+	// repository is public or includes untrusted contributors.
+	SpeculativeEnabled *bool `jsonapi:"attr,speculative-enabled,omitempty"`
+
 	// The version of Terraform to use for this workspace. Upon creating a
 	// workspace, the latest version is selected unless otherwise specified.
 	TerraformVersion *string `jsonapi:"attr,terraform-version,omitempty"`
@@ -205,6 +226,7 @@ type WorkspaceCreateOptions struct {
 	WorkingDirectory *string `jsonapi:"attr,working-directory,omitempty"`
 }
 
+// TODO: move this struct out. VCSRepoOptions is used by workspaces, policy sets, and registry modules
 // VCSRepoOptions represents the configuration options of a VCS integration.
 type VCSRepoOptions struct {
 	Branch            *string `json:"branch,omitempty"`
@@ -220,6 +242,16 @@ func (o WorkspaceCreateOptions) valid() error {
 	if !validStringID(o.Name) {
 		return errors.New("invalid value for name")
 	}
+	if o.Operations != nil && o.ExecutionMode != nil {
+		return errors.New("operations is deprecated and cannot be specified when execution mode is used")
+	}
+	if o.AgentPoolID != nil && (o.ExecutionMode == nil || *o.ExecutionMode != "agent") {
+		return errors.New("specifying an agent pool ID requires 'agent' execution mode")
+	}
+	if o.AgentPoolID == nil && (o.ExecutionMode != nil && *o.ExecutionMode == "agent") {
+		return errors.New("'agent' execution mode requires an agent pool ID to be specified")
+	}
+
 	return nil
 }
 
@@ -304,6 +336,11 @@ type WorkspaceUpdateOptions struct {
 	// For internal use only!
 	ID string `jsonapi:"primary,workspaces"`
 
+	// Required when execution-mode is set to agent. The ID of the agent pool
+	// belonging to the workspace's organization. This value must not be specified
+	// if execution-mode is set to remote or local or if operations is set to true.
+	AgentPoolID *string `jsonapi:"attr,agent-pool-id,omitempty"`
+
 	// Whether to automatically apply changes when a Terraform plan is successful.
 	AutoApply *bool `jsonapi:"attr,auto-apply,omitempty"`
 
@@ -312,6 +349,11 @@ type WorkspaceUpdateOptions struct {
 	// organization. Warning: Changing a workspace's name changes its URL in the
 	// API and UI.
 	Name *string `jsonapi:"attr,name,omitempty"`
+
+	// Which execution mode to use. Valid values are remote, local, and agent.
+	// When set to local, the workspace will be used for state storage only.
+	// This value must not be specified if operations is specified.
+	ExecutionMode *string `jsonapi:"attr,execution-mode,omitempty"`
 
 	// Whether to filter runs based on the changed files in a VCS push. If
 	// enabled, the working directory and trigger prefixes describe a set of
@@ -325,6 +367,12 @@ type WorkspaceUpdateOptions struct {
 	// Whether to queue all runs. Unless this is set to true, runs triggered by
 	// a webhook will not be queued until at least one run is manually queued.
 	QueueAllRuns *bool `jsonapi:"attr,queue-all-runs,omitempty"`
+
+	// Whether this workspace allows speculative plans. Setting this to false
+	// prevents Terraform Cloud or the Terraform Enterprise instance from
+	// running plans on pull requests, which can improve security if the VCS
+	// repository is public or includes untrusted contributors.
+	SpeculativeEnabled *bool `jsonapi:"attr,speculative-enabled,omitempty"`
 
 	// The version of Terraform to use for this workspace.
 	TerraformVersion *string `jsonapi:"attr,terraform-version,omitempty"`
@@ -347,6 +395,20 @@ type WorkspaceUpdateOptions struct {
 	WorkingDirectory *string `jsonapi:"attr,working-directory,omitempty"`
 }
 
+func (o WorkspaceUpdateOptions) valid() error {
+	if o.Name != nil && !validStringID(o.Name) {
+		return errors.New("invalid value for name")
+	}
+	if o.Operations != nil && o.ExecutionMode != nil {
+		return errors.New("operations is deprecated and cannot be specified when execution mode is used")
+	}
+	if o.AgentPoolID == nil && (o.ExecutionMode != nil && *o.ExecutionMode == "agent") {
+		return errors.New("'agent' execution mode requires an agent pool ID to be specified")
+	}
+
+	return nil
+}
+
 // Update settings of an existing workspace.
 func (s *workspaces) Update(ctx context.Context, organization, workspace string, options WorkspaceUpdateOptions) (*Workspace, error) {
 	if !validStringID(&organization) {
@@ -354,6 +416,9 @@ func (s *workspaces) Update(ctx context.Context, organization, workspace string,
 	}
 	if !validStringID(&workspace) {
 		return nil, errors.New("invalid value for workspace")
+	}
+	if err := options.valid(); err != nil {
+		return nil, err
 	}
 
 	// Make sure we don't send a user provided ID.
