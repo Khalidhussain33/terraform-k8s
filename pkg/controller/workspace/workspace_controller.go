@@ -358,7 +358,7 @@ func (r *ReconcileWorkspace) prepareModuleRun(instance *appv1alpha1.Workspace, o
 	}
 
 	err = os.Mkdir(moduleDirectory, 0777)
-	if err != nil {
+	if err != nil && !os.IsExist(err){
 		return err
 	}
 
